@@ -19,7 +19,7 @@ outdir=dist
 outfile=$(file)_$(OS_sub)_$(Arch)
 
 ifeq ($(OS),Windows_NT)
-LDFLAGS=-lsioclient -lsioclient_tls -lws2_32 -lssl -lcrypto -lcurl -lpthread -lmswsock
+LDFLAGS=-lsioclient -lsioclient_tls -lws2_32 -lssl -lcrypto -lcurl -lpthread -lmswsock -lboost_system -lboost_thread -ljsoncpp
 build:
 ifeq (,$(wildcard $(outdir)))
 	mkdir $(outdir)
@@ -45,6 +45,9 @@ run: build
 	$(MAKE) --no-print-directory clean
 app:
 	$(MAKE) --no-print-directory build
+
+install:
+	sudo apt-get install libssl-dev libcurl4-openssl-dev libboost-all-dev libjsoncpp-dev
 clean:
 	rm -f $(outfile) *.exe
 	rm -rf $(outdir)
