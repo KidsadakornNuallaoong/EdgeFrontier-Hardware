@@ -5,6 +5,7 @@ GXX=g++
 CXXFLAGS=
  
 file=main
+outname=EdgeFrontier
 
 ifeq ($(OS), Windows_NT)
 	OS_sub=windows
@@ -16,7 +17,7 @@ endif
 
 inputfile=$(file).cpp
 outdir=dist
-outfile=$(file)_$(OS_sub)_$(Arch)
+outfile=$(outname)_$(OS_sub)_$(Arch)
 
 ifeq ($(OS),Windows_NT)
 LDFLAGS=-lsioclient -lsioclient_tls -lws2_32 -lssl -lcrypto -lcurl -lpthread -lmswsock -lboost_system -lboost_thread -ljsoncpp

@@ -1,3 +1,30 @@
+/**
+ * @file main.cpp
+ * @brief WebSocket client for sending simulated sensor data.
+ * 
+ * This file contains the implementation of a WebSocket client that sends simulated sensor data
+ * to a WebSocket server. The sensor data is generated randomly and updated periodically.
+ * The client supports both secure (wss) and non-secure (ws) WebSocket connections.
+ * 
+ * The main components of this implementation include:
+ * - Sensor data simulation and updating.
+ * - WebSocket client setup and connection handling.
+ * - Environment variable loading from a .env file.
+ * 
+ * Dependencies:
+ * - nlohmann/json for JSON handling.
+ * - websocketpp for WebSocket client functionality.
+ * - Boost.Asio for SSL/TLS support.
+ * 
+ * @note This implementation uses multiple threads for updating sensor data, printing sensor data,
+ *       and handling WebSocket communication.
+ * 
+ * @section author Author
+ * Kidsadakorn Nuallaoong
+ * @date 2023-10-05
+ */
+ */
+
 #include <iostream>
 #include <thread>
 #include <mutex>
@@ -18,10 +45,10 @@
 typedef websocketpp::client<websocketpp::config::asio_client> client;
 typedef websocketpp::client<websocketpp::config::asio_tls_client> tls_client;
 
-// Global mutex for thread safety
+// * Global mutex for thread safety
 std::mutex mtx;
 
-// Random number generator for sensor data simulation
+// * Random number generator for sensor data simulation
 std::random_device rd;
 std::mt19937 gen(rd());
 std::uniform_real_distribution<> dis(0.0, 100.0);
@@ -29,7 +56,7 @@ std::uniform_real_distribution<> dis(0.0, 100.0);
 const char* Event[] = {"Cold", "Warm", "Hot", "Dry", "Wet", "Normal", "Unknown"};
 const char* HardwareID[] = {"EF-001", "EF-002"};
 
-// JSON structure holding initial sensor data
+// * JSON structure holding initial sensor data
 nlohmann::json sensor_data = {
     {"TimeStamp", "18/11/24 08:06:59"},
     {"HardwareID", "EF-001"},
@@ -44,7 +71,7 @@ nlohmann::json sensor_data = {
     }}
 };
 
-// Function to update sensor data with new random values
+// * Function to update sensor data with new random values
 void update_sensor_data(nlohmann::json& j) {
     std::lock_guard<std::mutex> lock(mtx);
     auto now = std::chrono::system_clock::now();
@@ -64,6 +91,14 @@ void update_sensor_data(nlohmann::json& j) {
     j["Data"]["PRESSURE"] = dis(gen);
 }
 
+/**
+ * @brief Prints the sensor data JSON to the console.
+ * 
+ * This function prints the sensor data JSON to the console.
+ * It acquires a lock on the mutex to ensure thread safety.
+ * 
+ * @note This function is intended to be run in a separate thread.
+ */
 void print_json() {
     while (true) {
         {
@@ -74,6 +109,14 @@ void print_json() {
     }
 }
 
+/**
+ * @brief Updates the sensor data JSON with new random values.
+ * 
+ * This function updates the sensor data JSON with new random values.
+ * It acquires a lock on the mutex to ensure thread safety.
+ * 
+ * @note This function is intended to be run in a separate thread.
+ */
 void update_json_loop() {
     while (true) {
         update_sensor_data(sensor_data);
@@ -81,18 +124,39 @@ void update_json_loop() {
     }
 }
 
-// Function to continuously send sensor data to the WebSocket server
+/**
+ * @brief Sends the sensor data JSON to the WebSocket server.
+ * 
+ * This function sends the sensor data JSON to the WebSocket server.
+ * It acquires a lock on the mutex to ensure thread safety.
+ * 
+ * @param c A pointer to the WebSocket client.
+ * @param hdl The WebSocket connection handle.
+ * 
+ * @note This function is intended to be run in a separate thread.
+ */
 void send_json_loop(client* c, websocketpp::connection_hdl hdl) {
     while (true) {
         {
-            std::lock_guard<std::mutex> lock(mtx); // Ensuring thread safety
-            std::string message = sensor_data.dump(); // Serialize the JSON message
-            c->send(hdl, message, websocketpp::frame::opcode::text); // Send the JSON message to the server
+            std::lock_guard<std::mutex> lock(mtx); // * Ensuring thread safety
+            std::string message = sensor_data.dump(); // * Serialize the JSON message
+            c->send(hdl, message, websocketpp::frame::opcode::text); // * Send the JSON message to the server
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(200000)); // Sleep for 1 second before sending again
+        std::this_thread::sleep_for(std::chrono::microseconds(200000)); // * Sleep for 1 second before sending again
     }
 }
 
+/**
+ * @brief Sends the sensor data JSON to the WebSocket server.
+ *
+ * This function sends the sensor data JSON to the WebSocket server.
+ * It acquires a lock on the mutex to ensure thread safety.
+ *
+ * @param c A pointer to the TLS WebSocket client.
+ * @param hdl The WebSocket connection handle.
+ *
+ * @note This function is intended to be run in a separate thread.
+ */
 void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
     while (true) {
         {
@@ -108,16 +172,43 @@ void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
     }
 }
 
+/**
+ * @brief Handles the on_open event for a non-secure WebSocket connection.
+ * 
+ * This function starts a separate thread for sending the sensor data JSON to the WebSocket server.
+ * 
+ * @param c A pointer to the WebSocket client.
+ * @param hdl The WebSocket connection handle.
+ */
 void on_open(client* c, websocketpp::connection_hdl hdl) {
     std::thread send_thread(send_json_loop, c, hdl);
     send_thread.detach();
 }
 
+/**
+ * @brief Handles the on_open event for a secure WebSocket connection.
+ *
+ * This function starts a separate thread for sending the sensor data JSON to the WebSocket server.
+ *
+ * @param c A pointer to the TLS WebSocket client.
+ * @param hdl The WebSocket connection handle.
+ */
 void on_open_secure(tls_client* c, websocketpp::connection_hdl hdl) {
     std::thread send_thread(send_json_loop_secure, c, hdl);
     send_thread.detach();
 }
 
+/**
+ * @brief Initializes the TLS context for the WebSocket connection.
+ *
+ * This function initializes the TLS context for the WebSocket connection.
+ * It sets the TLS options for the context to use TLSv1.2 and disable SSLv2 and SSLv3.
+ *
+ * @param hdl The WebSocket connection handle.
+ * @return A shared pointer to the TLS context.
+ *
+ * @throws std::exception If an error occurs during TLS context initialization.
+ */
 std::shared_ptr<boost::asio::ssl::context> on_tls_init(websocketpp::connection_hdl) {
     std::shared_ptr<boost::asio::ssl::context> ctx(new boost::asio::ssl::context(boost::asio::ssl::context::tlsv12_client));
     try {
@@ -132,34 +223,47 @@ std::shared_ptr<boost::asio::ssl::context> on_tls_init(websocketpp::connection_h
     return ctx;
 }
 
+/**
+ * @brief Handles a non-secure WebSocket connection to the specified URI.
+ *
+ * This function sets up a WebSocket client, connects to the specified URI,
+ * and starts separate threads for handling the WebSocket connection, updating
+ * sensor data, and printing sensor data.
+ *
+ * @param uri The URI of the WebSocket server to connect to.
+ * @param c A pointer to the WebSocket client.
+ *
+ * @throws websocketpp::exception If a WebSocket error occurs.
+ * @throws std::exception If a general error occurs.
+ */
 void handle_no_secure(const std::string &uri, client *c)
 {
     try
     {
-        // Set logging settings for WebSocket client
+        // * Set logging settings for WebSocket client
         c->set_error_channels(websocketpp::log::elevel::none);
         c->set_access_channels(websocketpp::log::alevel::none);
-        // Initialize ASIO for WebSocket client
+        // * Initialize ASIO for WebSocket client
         c->init_asio();
-        // Set the open handler for the WebSocket connection
+        // * Set the open handler for the WebSocket connection
         c->set_open_handler(websocketpp::lib::bind(&on_open, c, websocketpp::lib::placeholders::_1));
-        // Create connection to WebSocket server
+        // * Create connection to WebSocket server
         websocketpp::lib::error_code ec;
         client::connection_ptr con = c->get_connection(uri, ec);
         if (ec) {
             std::cerr << "Error: " << ec.message() << std::endl;
             return;
         }
-        // Connect to the server
+        // * Connect to the server
         c->connect(con);
-        // Start a separate thread for WebSocket client to handle the connection
+        // * Start a separate thread for WebSocket client to handle the connection
         std::thread websocket_thread([c]() {
-            c->run(); // Run the WebSocket client
+            c->run(); // * Run the WebSocket client
         });
-        // Start threads for updating and printing the sensor data
+        // * Start threads for updating and printing the sensor data
         std::thread update_thread(update_json_loop);
         std::thread print_thread(print_json);
-        // Wait for threads to finish
+        // * Wait for threads to finish
         update_thread.join();
         print_thread.join();
         websocket_thread.join();
@@ -174,20 +278,38 @@ void handle_no_secure(const std::string &uri, client *c)
     }
 }
 
+/**
+ * @brief Handles a secure WebSocket connection.
+ *
+ * This function sets up and manages a secure WebSocket connection using the provided URI and TLS client.
+ * It initializes the WebSocket client, sets up handlers, and starts threads for handling the connection
+ * and updating/printing sensor data.
+ *
+ * @param uri The URI of the WebSocket server to connect to.
+ * @param tc A pointer to the TLS client used for the WebSocket connection.
+ *
+ * @note This function starts three separate threads:
+ *       - One for running the WebSocket client.
+ *       - One for updating sensor data.
+ *       - One for printing sensor data.
+ *
+ * @throws websocketpp::exception If a WebSocket error occurs.
+ * @throws std::exception If a general error occurs.
+ */
 void handle_secure(const std::string &uri, tls_client *tc)
 {
     try
     {
-        // Set logging settings for WebSocket client
+        // * Set logging settings for WebSocket client
         tc->set_error_channels(websocketpp::log::elevel::none);
         tc->set_access_channels(websocketpp::log::alevel::none);
-        // Initialize ASIO for WebSocket client
+        // * Initialize ASIO for WebSocket client
         tc->init_asio();
-        // Set the open handler for the WebSocket connection
+        // * Set the open handler for the WebSocket connection
         tc->set_open_handler(websocketpp::lib::bind(&on_open_secure, tc, websocketpp::lib::placeholders::_1));
-        // Set the TLS initialization handler for the WebSocket connection
+        // * Set the TLS initialization handler for the WebSocket connection
         tc->set_tls_init_handler(websocketpp::lib::bind(&on_tls_init, websocketpp::lib::placeholders::_1));
-        // Create connection to WebSocket server
+        // * Create connection to WebSocket server
         websocketpp::lib::error_code ec;
         tls_client::connection_ptr con = tc->get_connection(uri, ec);
         if (ec)
@@ -195,17 +317,17 @@ void handle_secure(const std::string &uri, tls_client *tc)
             std::cerr << "Error: " << ec.message() << std::endl;
             return;
         }
-        // Connect to the server
+        // * Connect to the server
         tc->connect(con);
-        // Start a separate thread for WebSocket client to handle the connection
+        // * Start a separate thread for WebSocket client to handle the connection
         std::thread websocket_thread([tc]()
                                         {
-                                            tc->run(); // Run the WebSocket client
+                                            tc->run(); // * Run the WebSocket client
                                         });
-        // Start threads for updating and printing the sensor data
+        // * Start threads for updating and printing the sensor data
         std::thread update_thread(update_json_loop);
         std::thread print_thread(print_json);
-        // Wait for threads to finish
+        // * Wait for threads to finish
         update_thread.join();
         print_thread.join();
         websocket_thread.join();
@@ -220,6 +342,20 @@ void handle_secure(const std::string &uri, tls_client *tc)
     }
 }
 
+/**
+ * @brief Loads environment variables from a .env file into an unordered_map.
+ *
+ * This function reads a .env file specified by the filePath and loads the key-value pairs
+ * into an unordered_map. It also optionally sets the variables in the environment.
+ *
+ * @param filePath The path to the .env file.
+ * @return An unordered_map containing the key-value pairs from the .env file.
+ *
+ * @note Lines that are empty or start with '#' are ignored.
+ * @note Lines that do not contain an '=' delimiter are considered malformed and are ignored.
+ * @note Whitespace trimming around keys and values is not implemented but can be added if needed.
+ * @note On Windows, environment variables are set using _putenv. On other platforms, setenv is used.
+ */
 std::unordered_map<std::string, std::string> loadEnvFile(const std::string& filePath) {
     std::unordered_map<std::string, std::string> envMap;
     std::ifstream envFile(filePath);
@@ -230,7 +366,7 @@ std::unordered_map<std::string, std::string> loadEnvFile(const std::string& file
 
     std::string line;
     while (std::getline(envFile, line)) {
-        // Skip comments or empty lines
+        // * Skip comments or empty lines
         if (line.empty() || line[0] == '#') {
             continue;
         }
@@ -244,10 +380,10 @@ std::unordered_map<std::string, std::string> loadEnvFile(const std::string& file
         std::string key = line.substr(0, delimiterPos);
         std::string value = line.substr(delimiterPos + 1);
 
-        // Trim whitespace (optional, implement trim logic if needed)
+        // * Trim whitespace (optional, implement trim logic if needed)
         envMap[key] = value;
 
-        // Optionally set the variable in the environment
+        // * Optionally set the variable in the environment
         #ifdef _WIN32
         _putenv((key + "=" + value).c_str());
         #else
@@ -258,17 +394,27 @@ std::unordered_map<std::string, std::string> loadEnvFile(const std::string& file
     return envMap;
 }
 
+/**
+ * @brief Checks if the URI is secure (wss://).
+ * 
+ * @param uri The URI to check.
+ * @return true if the URI is secure (wss://), false otherwise.
+ * 
+ * @note This function checks if the URI starts with "wss://".
+ * 
+ * @note This function is case-sensitive.
+ * **/
 bool is_secure(const std::string &uri)
 {
-    return uri.substr(0, 3) == "wss"; // * if detected wss:// return true
+    return uri.substr(0, 3) == "wss"; // * * if detected wss:// * return true
 }
 
 int main() {
-    // Load environment variables from .env file
+    // * Load environment variables from .env file
     std::string envFilePath = "example.env";
     auto envMap = loadEnvFile(envFilePath);
 
-    // WebSocket client initialization
+    // * WebSocket client initialization
     const char* uri_cstr = getenv("WS_URI");
     if (uri_cstr == nullptr) {
         std::cerr << "Error: WS_URI environment variable is not set." << std::endl;
