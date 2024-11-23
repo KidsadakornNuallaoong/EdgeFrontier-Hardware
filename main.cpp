@@ -39,26 +39,27 @@
 #include <websocketpp/common/thread.hpp>
 #include <websocketpp/config/asio.hpp>
 #include <boost/asio/ssl/context.hpp>
-#include "db_helper.hpp"
-#include "log_manager.hpp"
+#include "Libs/db_helper.hpp"
+#include "Libs/log_manager.hpp"
+#include "Libs/MLP/MLP.hpp"
+#include "Libs/http_helper.hpp"
+
+// * Enum for operating mode
+enum mode {SAFE_MODE, PREDICTION_MODE};
+mode current_mode = SAFE_MODE;
 
 #ifdef _WIN32
     #include <thread>
     #include <conio.h> // For _kbhit and _getch
     
-    bool running = true;
-    bool trainning_display = false;
+    bool is_run = true;
 
-    void checkInput() {
-        while (running) {
+    void checkInput_main() {
+        while (is_run) {
             if (_kbhit()) {
                 char ch = _getch();
-                if (ch == 'q' || ch == 'Q') {
-                    running = false;
-                }
-
-                if (ch == 'd' || ch == 'D') {
-                    trainning_display = !trainning_display;
+                if (ch == 't' || ch == 'T') {
+                    is_run = false;
                 }
             }
         }
@@ -71,10 +72,9 @@
     #include <fcntl.h>
     #include <termios.h>
 
-    std::atomic<bool> running(true);
-    std::atomic<bool> trainning_display(false);
+    std::atomic<bool> is_run(true);
 
-    bool kbhit() {
+    bool kbhit_main() {
         struct termios oldt, newt;
         int ch;
         int oldf;
@@ -104,12 +104,16 @@
         return false;
     }
 
-    void checkInput() {
-        while (running) {
-            if (kbhit()) {
+    void checkInput_main() {
+        while (is_run) {
+            if (kbhit_main()) {
                 char ch = getchar();
-                if (ch == 'q' || ch == 'Q') {
-                    running = false;
+                if (ch == 't' || ch == 'T') {
+                    is_run = false;
+                }
+
+                if (ch == 'm' || ch == 'M') {
+                    current_mode = (current_mode == SAFE_MODE) ? PREDICTION_MODE : SAFE_MODE;
                 }
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Small delay to avoid high CPU usage
@@ -131,14 +135,16 @@ std::random_device rd;
 std::mt19937 gen(rd());
 std::uniform_real_distribution<> dis(0.0, 100.0);
 
+// * Event types for sensor data
 const char* Event[] = {"Cold", "Warm", "Hot", "Dry", "Wet", "Normal", "Unknown"};
-const char* HardwareID[] = {"EF-001", "EF-002"};
+std::string HardwareID = "EF-001";
 
 // * JSON structure holding initial sensor data
 nlohmann::json sensor_data = {
     {"TimeStamp", "18/11/24 08:06:59"},
-    {"HardwareID", "EF-001"},
+    {"HardwareID", HardwareID},
     {"Event", "Cold"},
+    {"Mode", (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode"},
     {"Data", {
         {"CO2", dis(gen)},
         {"VOC", dis(gen)},
@@ -146,10 +152,21 @@ nlohmann::json sensor_data = {
         {"TEMP", dis(gen)},
         {"HUMID", dis(gen)},
         {"PRESSURE", dis(gen)}
+    }},
+    {"Prediction", {
+        {"Cold", 0.0},
+        {"Warm", 0.0},
+        {"Hot", 0.0},
+        {"Dry", 0.0},
+        {"Wet", 0.0},
+        {"Normal", 0.0},
+        {"Unknown", 0.0}
     }}
 };
 
-// * Function to update sensor data with new random values
+void Delay(){ std::this_thread::sleep_for(std::chrono::microseconds(1000)); }
+
+// * Function to update sensor data with new Arandom values
 void update_sensor_data(nlohmann::json& j) {
     std::lock_guard<std::mutex> lock(mtx);
     auto now = std::chrono::system_clock::now();
@@ -159,8 +176,9 @@ void update_sensor_data(nlohmann::json& j) {
     j["TimeStamp"] = ss.str();
     std::uniform_int_distribution<> hardware_dist(0, sizeof(HardwareID)/sizeof(HardwareID[0]) - 1);
     std::uniform_int_distribution<> event_dist(0, sizeof(Event)/sizeof(Event[0]) - 1);
-    j["HardwareID"] = HardwareID[hardware_dist(gen)];
+    j["HardwareID"] = HardwareID;
     j["Event"] = Event[event_dist(gen)];
+    j["Mode"] = (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode";
     j["Data"]["CO2"] = dis(gen);
     j["Data"]["VOC"] = dis(gen);
     j["Data"]["RA"] = dis(gen);
@@ -182,13 +200,28 @@ void update_sensor_data(nlohmann::json& j) {
  * @note This function is intended to be run in a separate thread.
  **/
 void print_json() {
-    while (running) {
+    std::cout << "Starting print_json thread" << std::endl;
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting print json thread");
+
+    while (is_run) {
         {
             std::lock_guard<std::mutex> lock(mtx);
-            std::cout << sensor_data.dump(4) << std::endl;
+            // * if safe mode dump json but not dump prediction
+            if (current_mode == SAFE_MODE) {
+                nlohmann::json safe_mode_data = sensor_data;
+                safe_mode_data.erase("Prediction");
+                std::cout << safe_mode_data.dump(4) << std::endl;
+            } else {
+                std::cout << sensor_data.dump(4) << std::endl;
+            }
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(200000));
+        Delay();
     }
+
+    std::cout << "Exiting print_json thread" << std::endl;
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting print json thread");
 }
 
 /**
@@ -200,10 +233,17 @@ void print_json() {
  * @note This function is intended to be run in a separate thread.
  **/
 void update_json_loop() {
-    while (running) {
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting update json loop thread");
+
+    while (is_run) {
         update_sensor_data(sensor_data);
         std::this_thread::sleep_for(std::chrono::microseconds(200000));
     }
+
+    std::cout << "Exiting update_json_loop thread" << std::endl;
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting update json loop thread");
 }
 
 /**
@@ -218,14 +258,22 @@ void update_json_loop() {
  * @note This function is intended to be run in a separate thread.
  **/
 void send_json_loop(client* c, websocketpp::connection_hdl hdl) {
-    while (running) {
+    std::cout << "Starting send_json_loop thread" << std::endl;
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting send json loop thread");
+    
+    while (is_run) {
         {
             std::lock_guard<std::mutex> lock(mtx); // Ensuring thread safety
             std::string message = sensor_data.dump(); // Serialize the JSON message
             c->send(hdl, message, websocketpp::frame::opcode::text); // Send the JSON message to the server
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(200000)); // Sleep for 1 second before sending again
+        Delay();
     }
+
+    std::cout << "Exiting send_json_loop thread" << std::endl;
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting send json loop thread");
 }
 
 /**
@@ -240,7 +288,11 @@ void send_json_loop(client* c, websocketpp::connection_hdl hdl) {
  * @note This function is intended to be run in a separate thread.
  **/
 void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
-    while (running){
+    std::cout << "Starting send_json_loop_secure thread" << std::endl;
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting send json loop secure thread");
+
+    while (is_run){
         {
             std::lock_guard<std::mutex> lock(mtx);
             std::string message = sensor_data.dump();
@@ -250,8 +302,36 @@ void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
                 std::cerr << "Send error: " << ec.message() << std::endl;
             }
         }
-        std::this_thread::sleep_for(std::chrono::microseconds(200000));
+        Delay();
     }
+
+    std::cout << "Exiting send_json_loop_secure thread" << std::endl;
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting send json loop secure thread");
+}
+
+void Ai_handle(){
+    MultiLayerPerceptron<double> mlp2;
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Setting up AI model");
+
+    mlp2.import_from_json("mlp_export.json");
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting Ai_handle thread");
+
+    while (is_run){
+        {
+            vector<vector<double>> inputs = {{static_cast<double>(rand()%2), static_cast<double>(rand()%2)}};
+            mlp2.predict(inputs, R_D);
+        }
+        Delay();
+    }
+
+    mlp2.clearModel();
+
+    std::cout << "Exiting Ai_handle thread" << std::endl;
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting AI handle thread");
 }
 
 /**
@@ -354,15 +434,36 @@ void handle_no_secure(const std::string &uri, client *c)
                                      });
         // * Start threads for updating and printing the sensor data
         logManager.setLogLevel(LogManager::DEBUG);
-        logManager.log(LogManager::DEBUG, "Starting data running with threads");
+        logManager.log(LogManager::DEBUG, "Starting data is_run with threads");
         std::thread update_thread(update_json_loop);
         std::thread print_thread(print_json);
+        std::thread Ai_thread(Ai_handle);
         // * Wait for threads to finish
         update_thread.join();
-        print_thread.join();
-        websocket_thread.join();
+        std::cout << "update_thread joined" << std::endl;
         logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Threads joined");
+        logManager.log(LogManager::INFO, "Updating sensor data thread joined");
+        
+        print_thread.join();
+        std::cout << "print_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+
+        Ai_thread.join();
+        std::cout << "Ai_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "AI thread joined");
+
+        if (!is_run) {
+            c->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Disconnected from WebSocket server");
+        }
+
+        websocket_thread.join();
+        std::cout << "websocket_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "WebSocket client thread joined");
     }
     catch (const websocketpp::exception &e)
     {
@@ -389,7 +490,7 @@ void handle_no_secure(const std::string &uri, client *c)
  * @param tc A pointer to the TLS client used for the WebSocket connection.
  *
  * @note This function starts three separate threads:
- *       - One for running the WebSocket client.
+ *       - One for is_run the WebSocket client.
  *       - One for updating sensor data.
  *       - One for printing sensor data.
  *
@@ -405,9 +506,9 @@ void handle_secure(const std::string &uri, tls_client *tc)
         // * Set logging settings for WebSocket client
         tc->set_error_channels(websocketpp::log::elevel::none);
         tc->set_access_channels(websocketpp::log::alevel::none);
-        // * 8Initialize ASIO for WebSocket client
+        // * Initialize ASIO for WebSocket client
         tc->init_asio();
-        // *  Set the open handler for the WebSocket connection
+        // * Set the open handler for the WebSocket connection
         tc->set_open_handler(websocketpp::lib::bind(&on_open_secure, tc, websocketpp::lib::placeholders::_1));
         // * Set the TLS initialization handler for the WebSocket connection
         tc->set_tls_init_handler(websocketpp::lib::bind(&on_tls_init, websocketpp::lib::placeholders::_1));
@@ -434,15 +535,35 @@ void handle_secure(const std::string &uri, tls_client *tc)
                                      });
         // * Start threads for updating and printing the sensor data
         logManager.setLogLevel(LogManager::DEBUG);
-        logManager.log(LogManager::DEBUG, "Starting data running with threads");
+        logManager.log(LogManager::DEBUG, "Starting data is_run with threads");
         std::thread update_thread(update_json_loop);
         std::thread print_thread(print_json);
+        std::thread Ai_thread(Ai_handle);
         // * Wait for threads to finish
         update_thread.join();
-        print_thread.join();
-        websocket_thread.join();
+        std::cout << "update_thread joined" << std::endl;
         logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Threads joined");
+        logManager.log(LogManager::INFO, "Updating sensor data thread joined");
+
+        print_thread.join();
+        std::cout << "print_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+
+        Ai_thread.join();
+        std::cout << "Ai_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "AI thread joined");
+
+        if (!is_run) {
+            tc->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Disconnected from WebSocket server");
+        }
+        websocket_thread.join();
+        std::cout << "websocket_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "WebSocket client thread joined");
     }
     catch (const websocketpp::exception &e)
     {
@@ -545,17 +666,23 @@ bool is_secure(const std::string &uri)
     return is_secure;
 }
 
-int main() {
+int main(int argc, char *argv[]){
+    std::cout << "EdgeFrontier - Sensor Data Simulator" << std::endl;
+    std::cout << "Press 'q' to quit the program." << std::endl;
+
+    for (int i = 0; i < argc; i++) {
+        std::cout << "Argument " << i << ": " << argv[i] << std::endl;
+    }
     // * Set the log file for the log manager
-    logManager.setLogFile("activity.log");
+    logManager.setLogFile("EdgeFrontier/log/activity.log");
     // * Load environment variables from .env file
-    std::string envFilePath = ".env";
+    std::string envFilePath = "EdgeFrontier/env/dev.env";
     auto envMap = loadEnvFile(envFilePath);
 
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Environment variables loaded from .env file.");
 
-    // * WebSocket client initialization
+    // * Check if the WS_URI environment variable is set
     const char* uri_cstr = getenv("WS_URI");
     if (uri_cstr == nullptr) {
         std::cerr << "Error: WS_URI environment variable is not set." << std::endl;
@@ -563,11 +690,26 @@ int main() {
         logManager.log(LogManager::ERR, "WS_URI environment variable is not set.");
         return 1;
     }
+
+    std::cout << "WS_URI: " << uri_cstr << std::endl;
+
+    // * Check if the REST_MAIN_SERVER environment variable is set
+    const char* rest_main_server_cstr = getenv("REST_MAIN_SERVER");
+    if (rest_main_server_cstr == nullptr) {
+        std::cerr << "Error: REST_MAIN_SERVER environment variable is not set." << std::endl;
+        logManager.setLogLevel(LogManager::ERR);
+        logManager.log(LogManager::ERR, "REST_MAIN_SERVER environment variable is not set.");
+        return 1;
+    }
+
+    std::cout << "REST_MAIN_SERVER: " << rest_main_server_cstr << std::endl;
+
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Connecting to WebSocket server");
 
     std::string uri(uri_cstr);
-    // std::cout << "Connecting to WebSocket server at: " << uri << std::endl;
+
+    std::cout << "Connecting to WebSocket server at: " << uri << std::endl;
     client c;
     tls_client tc;
     logManager.setLogLevel(LogManager::INFO);
@@ -576,11 +718,15 @@ int main() {
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Checking if WebSocket connection is secure.");
     
-    // * running thread for checking input
-    std::thread input_thread(checkInput);
+    // * is_run thread for checking input
+    std::thread input_thread(checkInput_main);
 
     // * Check if the WebSocket connection is secure
     is_secure(uri) ? handle_secure(uri, &tc) : handle_no_secure(uri, &c);
+
+    std::cout << "Exiting main thread" << std::endl;
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting main thread");
 
     // * Wait for the input thread to finish
     input_thread.join();

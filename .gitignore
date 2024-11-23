@@ -3,3 +3,6 @@ dist
 *.log
 *.db
 *.env
+EdgeFrontier
+Libs/MLP
+Libs/Perceptron
