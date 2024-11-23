@@ -20,7 +20,7 @@ outdir=dist
 outfile=$(outname)_$(OS_sub)_$(Arch)
 
 ifeq ($(OS),Windows_NT)
-LDFLAGS=-lsioclient -lsioclient_tls -lws2_32 -lssl -lcrypto -lcurl -lpthread -lmswsock -lboost_system -lboost_thread -ljsoncpp
+LDFLAGS=-lsioclient -lsioclient_tls -lws2_32 -lssl -lcrypto -lcurl -lpthread -lmswsock -lboost_system -lboost_thread -ljsoncpp -lsqlite3
 build:
 ifeq (,$(wildcard $(outdir)))
 	mkdir $(outdir)
@@ -35,7 +35,7 @@ clean:
 	del /f $(outfile).exe *.exe 2>nul || echo File not found
 	rmdir /s /q $(outdir) 2>nul || echo Directory not found
 else
-LDFLAGS=-lssl -lcrypto -lcurl -lpthread -lboost_system -lboost_thread -lsioclient -lsioclient_tls -ljsoncpp
+LDFLAGS=-lssl -lcrypto -lcurl -lpthread -lboost_system -lboost_thread -lsioclient -lsioclient_tls -ljsoncpp -lsqlite3
 build:
 ifeq (,$(wildcard $(outdir)))
 	mkdir $(outdir)
