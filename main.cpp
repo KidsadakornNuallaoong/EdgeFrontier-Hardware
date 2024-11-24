@@ -131,6 +131,10 @@ LogManager& logManager = LogManager::getInstance();
 // * Global mutex for thread safety
 std::mutex mtx;
 
+// * HTTP client
+HTTP http;
+std::string rest_main_server_cstr = "http://localhost:8181";
+
 // * Random number generator for sensor data simulation
 std::random_device rd;
 std::mt19937 gen(rd());
@@ -138,14 +142,14 @@ std::uniform_real_distribution<> dis(0.0, 100.0);
 
 // * Event types for sensor data
 const char* Event[] = {"Cold", "Warm", "Hot", "Dry", "Wet", "Normal", "Unknown"};
-std::string HardwareID = "EF-001";
+std::string HardwareID = "UNKNOWN";
 
 // * JSON structure holding initial sensor data
 nlohmann::json sensor_data = {
-    {"TimeStamp", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
+    {"TimeStamp", "2023-10-05 12:00:00"},
     {"HardwareID", HardwareID},
     {"Event", "Cold"},
-    {"Mode", (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode"},
+    {"Mode", (current_mode == PREDICTION_MODE) ? "PREDCITION" : "SAFE"},
     {"Data", {
         {"CO2", dis(gen)},
         {"VOC", dis(gen)},
@@ -170,31 +174,33 @@ speed current_speed = SLOW;
 
 nlohmann::json info = {
     {"HardwareID", HardwareID},
-    {"Mode", (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode"},
-    {"SPEED", (current_speed == SLOW) ? "SLOW" : (current_speed == MEDIUM) ? "MEDIUM" : "FAST"}
+    {"Mode", (current_mode == PREDICTION_MODE) ? "PREDCITION" : "SAFE"},
+    {"Speed", (current_speed == SLOW) ? "SLOW" : (current_speed == MEDIUM) ? "MEDIUM" : "FAST"}
 };
 
-void Delay(){ std::this_thread::sleep_for(std::chrono::microseconds(100000)); }
-
-void change_mode( mode m) {
-    current_mode = m;
-    info["Mode"] = (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode";
+void delay(){
+    current_speed == SLOW ? std::this_thread::sleep_for(std::chrono::seconds(1)) :
+    (current_speed == MEDIUM) ? std::this_thread::sleep_for(std::chrono::microseconds(200000)) :
+    std::this_thread::sleep_for(std::chrono::microseconds(100000));
 }
 
-void change_speed(speed s) {
-    current_speed = s;
-    info["SPEED"] = (current_speed == SLOW) ? "SLOW" : (current_speed == MEDIUM) ? "MEDIUM" : "FAST";
-}
+void delay_server(){ std::this_thread::sleep_for(std::chrono::seconds(1)); }
 
 // * Function to update sensor data with new Arandom values
 void update_sensor_data(nlohmann::json& j) {
     std::lock_guard<std::mutex> lock(mtx);
-    j["TimeStamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    // * update timestamp
+    std::time_t t = std::time(nullptr);
+    std::tm tm = *std::localtime(&t);
+    std::stringstream ss;
+    ss << std::put_time(&tm, "%Y-%m-%d %H:%M:%S");
+    j["TimeStamp"] = ss.str();
+    // * update data
     std::uniform_int_distribution<> hardware_dist(0, sizeof(HardwareID)/sizeof(HardwareID[0]) - 1);
     std::uniform_int_distribution<> event_dist(0, sizeof(Event)/sizeof(Event[0]) - 1);
     j["HardwareID"] = HardwareID;
     j["Event"] = Event[event_dist(gen)];
-    j["Mode"] = (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode";
+    j["Mode"] = (current_mode == PREDICTION_MODE) ? "PREDICTION" : "SAFE";
     j["Data"]["CO2"] = dis(gen);
     j["Data"]["VOC"] = dis(gen);
     j["Data"]["RA"] = dis(gen);
@@ -205,6 +211,13 @@ void update_sensor_data(nlohmann::json& j) {
     // Log the updated sensor data
     // logManager.setLogLevel(LogManager::DEBUG);
     // logManager.log(LogManager::DEBUG, "Sensor data updated");
+}
+
+void update_info(nlohmann::json& j) {
+    std::lock_guard<std::mutex> lock(mtx);
+    j["HardwareID"] = HardwareID;
+    j["Mode"] = (current_mode == PREDICTION_MODE) ? "PREDICTION" : "SAFE";
+    j["Speed"] = (current_speed == SLOW) ? "SLOW" : (current_speed == MEDIUM) ? "MEDIUM" : "FAST";
 }
 
 /**
@@ -232,7 +245,7 @@ void print_json() {
                 std::cout << sensor_data.dump(4) << std::endl;
             }
         }
-        Delay();
+        delay();
     }
 
     std::cout << "Exiting print_json thread" << std::endl;
@@ -254,6 +267,7 @@ void update_json_loop() {
 
     while (is_run) {
         update_sensor_data(sensor_data);
+        update_info(info);
         std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
@@ -284,7 +298,7 @@ void send_json_loop(client* c, websocketpp::connection_hdl hdl) {
             std::string message = sensor_data.dump(); // Serialize the JSON message
             c->send(hdl, message, websocketpp::frame::opcode::text); // Send the JSON message to the server
         }
-        Delay();
+        delay();
     }
 
     std::cout << "Exiting send_json_loop thread" << std::endl;
@@ -318,7 +332,7 @@ void send_json_loop_secure(tls_client* tc, websocketpp::connection_hdl hdl) {
                 std::cerr << "Send error: " << ec.message() << std::endl;
             }
         }
-        Delay();
+        delay();
     }
 
     std::cout << "Exiting send_json_loop_secure thread" << std::endl;
@@ -340,7 +354,7 @@ void Ai_handle() {
             vector<vector<double>> inputs = {{static_cast<double>(rand()%2), static_cast<double>(rand()%2)}};
             mlp2.predict(inputs, R_D);
         }
-        Delay();
+        delay();
     }
 
     mlp2.clearModel();
@@ -348,6 +362,59 @@ void Ai_handle() {
     std::cout << "Exiting Ai_handle thread" << std::endl;
     logManager.setLogLevel(LogManager::INFO);
     logManager.log(LogManager::INFO, "Exiting AI handle thread");
+}
+
+void handle_machine(){
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting handle_machine thread");
+    nlohmann::json HID_only;
+    nlohmann::json pre_info;
+
+    std::string HID, MODE, SPEED;
+    while (is_run) {
+        HID_only = {
+            {"HardwareID", HardwareID}
+        };
+        std::cout << HID_only.dump(4) << std::endl;
+        std::string res = http.post_json(rest_main_server_cstr + "/hardware", HID_only.dump());
+        std::cout << "Response: " << res << std::endl;
+        if (res != "") {
+            pre_info = nlohmann::json::parse(res);
+            if (pre_info["HardwareID"] != "UNKNOWN") {
+                HardwareID = pre_info["HardwareID"].get<std::string>();
+                MODE = pre_info["Mode"].get<std::string>();
+                SPEED = pre_info["Speed"].get<std::string>();
+                std::transform(HardwareID.begin(), HardwareID.end(), HardwareID.begin(), ::toupper);
+                std::transform(MODE.begin(), MODE.end(), MODE.begin(), ::toupper);
+                std::transform(SPEED.begin(), SPEED.end(), SPEED.begin(), ::toupper);
+                if (MODE == "PREDICTION") {
+                    current_mode = PREDICTION_MODE;
+                    logManager.setLogLevel(LogManager::INFO);
+                    logManager.log(LogManager::INFO, "Switching to PREDICTION mode");
+                } else {
+                    current_mode = SAFE_MODE;
+                    logManager.setLogLevel(LogManager::INFO);
+                    logManager.log(LogManager::INFO, "Switching to SAFE mode");
+                }
+                if (SPEED == "SLOW") {
+                    current_speed = SLOW;
+                    logManager.setLogLevel(LogManager::INFO);
+                    logManager.log(LogManager::INFO, "Setting speed to SLOW");
+                } else if (SPEED == "MEDIUM") {
+                    current_speed = MEDIUM;
+                    logManager.setLogLevel(LogManager::INFO);
+                    logManager.log(LogManager::INFO, "Setting speed to MEDIUM");
+                } else {
+                    current_speed = FAST;
+                    logManager.setLogLevel(LogManager::INFO);
+                    logManager.log(LogManager::INFO, "Setting speed to FAST");
+                }
+            }
+        }
+        delay_server();
+    }
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Exiting handle_machine thread");
 }
 
 /**
@@ -553,7 +620,6 @@ void handle_secure(const std::string &uri, tls_client *tc)
         // * Create connection to WebSocket server
         websocketpp::lib::error_code ec;
         std::cout << "Connecting to secure WebSocket server at " << uri_clean << std::endl;
-        change_mode(PREDICTION_MODE);
         tls_client::connection_ptr con = tc->get_connection(uri_clean, ec);
         if (ec)
         {
@@ -708,6 +774,7 @@ bool is_secure(const std::string &uri)
 int main(int argc, char *argv[]){
     std::cout << "EdgeFrontier - Sensor Data Simulator" << std::endl;
     std::cout << "Press 't' or 'T' to quit the program." << std::endl;
+    std::cout << "Press 'm' or 'M' to change mode." << std::endl;
 
     for (int i = 0; i < argc; i++) {
         std::cout << "Argument " << i << ": " << argv[i] << std::endl;
@@ -734,10 +801,13 @@ int main(int argc, char *argv[]){
     ws_uri_cstr.erase(ws_uri_cstr.find_last_not_of("\t\n\r\f\v") + 1);
 
     std::string uri(ws_uri_cstr);
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "WS_URI environment variable is set.");
+
     std::cout << "WS_URI: " << uri << std::endl;
 
     // * Check if the REST_MAIN_SERVER environment variable is set
-    std::string rest_main_server_cstr = getenv("REST_MAIN_SERVER");
+    rest_main_server_cstr = getenv("REST_MAIN_SERVER");
     if (rest_main_server_cstr.empty()) {
         std::cerr << "Error: REST_MAIN_SERVER environment variable is not set." << std::endl;
         logManager.setLogLevel(LogManager::ERR);
@@ -747,7 +817,26 @@ int main(int argc, char *argv[]){
     // TODO I recommend to remove this "\t\n\r\f\v" at the end of the string
     rest_main_server_cstr.erase(rest_main_server_cstr.find_last_not_of("\t\n\r\f\v") + 1);
 
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "REST_MAIN_SERVER environment variable is set.");
+
     std::cout << "REST_MAIN_SERVER: " << rest_main_server_cstr << std::endl;
+
+    std::string response = http.get(rest_main_server_cstr + "/register");
+    std::cout << "Response: " << response << std::endl;
+
+    if (response == "") {
+        std::cerr << "Error: Unable to connect to the main server." << std::endl;
+        logManager.setLogLevel(LogManager::ERR);
+        logManager.log(LogManager::ERR, "Unable to connect to the main server.");
+        return 1;
+    }
+
+    // * parse response to json
+    nlohmann::json j = nlohmann::json::parse(response);
+    HardwareID = j["HardwareID"];
+
+    std::cout << "HardwareID: " << HardwareID << std::endl;
 
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Connecting to WebSocket server");
@@ -763,9 +852,14 @@ int main(int argc, char *argv[]){
     
     // * is_run thread for checking input
     std::thread input_thread(checkInput_main);
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting input checking thread");
+
+    std::thread machine_thread(handle_machine);
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting machine handle thread");
 
     // * Check if the WebSocket connection is secure
-    cout << uri << endl;
     is_secure(uri) ? handle_secure(ws_uri_cstr, &tc) : handle_no_secure(ws_uri_cstr, &c);
 
     std::cout << "Exiting main thread" << std::endl;
@@ -774,6 +868,11 @@ int main(int argc, char *argv[]){
 
     // * Wait for the input thread to finish
     input_thread.join();
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Input checking thread joined");
+    machine_thread.join();
+    logManager.setLogLevel(LogManager::INFO);
+    logManager.log(LogManager::INFO, "Machine handle thread joined");
     
     return 0;
 }
