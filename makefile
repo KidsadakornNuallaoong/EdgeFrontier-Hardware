@@ -72,8 +72,9 @@ run: build
 app:
 	$(MAKE) --no-print-directory build
 set-folder:
-	mkdir $(outdir)\app $(outdir)\env $(outdir)\log
+	mkdir $(outdir)\app $(outdir)\env $(outdir)\log $(outdir)\model
 	copy dev.env $(outdir)\env
+	copy model.json $(outdir)\model
 clean:
 	del $(outfile).exe *.exe .\$(Library_Path)\$(Perceptron_Path)\*.o .\$(Library_Path)\$(MLP_Path)\*.o
 	rmdir /s /q $(outdir)
