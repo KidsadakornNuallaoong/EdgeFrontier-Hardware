@@ -33,13 +33,13 @@
 #include <string>
 #include <cstdlib>
 #include <unordered_map>
+#include <iomanip>
 #include <nlohmann/json.hpp>
 #include <websocketpp/client.hpp>
 #include <websocketpp/config/asio_client.hpp>
 #include <websocketpp/common/thread.hpp>
 #include <websocketpp/config/asio.hpp>
 #include <boost/asio/ssl/context.hpp>
-#include "Libs/db_helper.hpp"
 #include "Libs/log_manager.hpp"
 #include "Libs/MLP/MLP.hpp"
 #include "Libs/http_helper.hpp"
@@ -122,6 +122,7 @@ mode current_mode = SAFE_MODE;
 #endif
 
 typedef websocketpp::client<websocketpp::config::asio_client> client;
+
 typedef websocketpp::client<websocketpp::config::asio_tls_client> tls_client;
 
 // * Global log manager instance
@@ -164,7 +165,7 @@ nlohmann::json sensor_data = {
     }}
 };
 
-void Delay(){ std::this_thread::sleep_for(std::chrono::microseconds(1000)); }
+void Delay(){ std::this_thread::sleep_for(std::chrono::microseconds(10000000));}
 
 // * Function to update sensor data with new Arandom values
 void update_sensor_data(nlohmann::json& j) {
@@ -238,7 +239,7 @@ void update_json_loop() {
 
     while (is_run) {
         update_sensor_data(sensor_data);
-        std::this_thread::sleep_for(std::chrono::microseconds(200000));
+        std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     std::cout << "Exiting update_json_loop thread" << std::endl;
@@ -287,7 +288,7 @@ void send_json_loop(client* c, websocketpp::connection_hdl hdl) {
  *
  * @note This function is intended to be run in a separate thread.
  **/
-void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
+void send_json_loop_secure(tls_client* tc, websocketpp::connection_hdl hdl) {
     std::cout << "Starting send_json_loop_secure thread" << std::endl;
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Starting send json loop secure thread");
@@ -297,7 +298,7 @@ void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
             std::lock_guard<std::mutex> lock(mtx);
             std::string message = sensor_data.dump();
             websocketpp::lib::error_code ec;
-            c->send(hdl, message, websocketpp::frame::opcode::text, ec);
+            tc->send(hdl, message, websocketpp::frame::opcode::text, ec);
             if (ec) {
                 std::cerr << "Send error: " << ec.message() << std::endl;
             }
@@ -310,7 +311,7 @@ void send_json_loop_secure(tls_client* c, websocketpp::connection_hdl hdl) {
     logManager.log(LogManager::INFO, "Exiting send json loop secure thread");
 }
 
-void Ai_handle(){
+void Ai_handle() {
     MultiLayerPerceptron<double> mlp2;
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Setting up AI model");
@@ -355,8 +356,8 @@ void on_open(client* c, websocketpp::connection_hdl hdl) {
  * @param c A pointer to the TLS WebSocket client.
  * @param hdl The WebSocket connection handle.
  **/
-void on_open_secure(tls_client* c, websocketpp::connection_hdl hdl) {
-    std::thread send_thread(send_json_loop_secure, c, hdl);
+void on_open_secure(tls_client* tc, websocketpp::connection_hdl hdl) {
+    std::thread send_thread(send_json_loop_secure, tc, hdl);
     send_thread.detach();
 }
 
@@ -380,6 +381,8 @@ std::shared_ptr<boost::asio::ssl::context> on_tls_init(websocketpp::connection_h
                          boost::asio::ssl::context::single_dh_use);
     } catch (std::exception& e) {
         std::cerr << "TLS error: " << e.what() << std::endl;
+        logManager.setLogLevel(LogManager::ERR);
+        logManager.log(LogManager::ERR, "TLS error: " + std::string(e.what()));
         throw;
     }
     return ctx;
@@ -402,6 +405,14 @@ void handle_no_secure(const std::string &uri, client *c)
 {
     try
     {
+        // * clean uri before use
+        std::string uri_clean = uri;
+        if (uri_clean.find_first_of("\t\n\r\f\v") != std::string::npos)
+        {
+            uri_clean.erase(uri_clean.find_first_of("\t\n\r\f\v"));
+            logManager.setLogLevel(LogManager::DEBUG);
+            logManager.log(LogManager::DEBUG, "Deleted \\t\\n\\r\\f\\v from uri and now uri is clean");
+        }
         logManager.setLogLevel(LogManager::DEBUG);
         logManager.log(LogManager::DEBUG, "Setting up non-secure WebSocket connection");
         // * Set logging settings for WebSocket client
@@ -413,7 +424,7 @@ void handle_no_secure(const std::string &uri, client *c)
         c->set_open_handler(websocketpp::lib::bind(&on_open, c, websocketpp::lib::placeholders::_1));
         // * Create connection to WebSocket server
         websocketpp::lib::error_code ec;
-        client::connection_ptr con = c->get_connection(uri, ec);
+        client::connection_ptr con = c->get_connection(uri_clean, ec);
         if (ec)
         {
             std::cerr << "Error: " << ec.message() << std::endl;
@@ -501,6 +512,17 @@ void handle_secure(const std::string &uri, tls_client *tc)
 {
     try
     {
+        // * clean uri before use
+        std::string uri_clean = uri;
+        // uri_clean.erase(uri_clean.find_last_not_of("\t\n\r\f\v") + 1);
+        // * check uri have "\t\n\r\f\v" or not If have remove it
+        if (uri_clean.find_first_of("\t\n\r\f\v") != std::string::npos)
+        {
+            uri_clean.erase(uri_clean.find_first_of("\t\n\r\f\v"));
+            logManager.setLogLevel(LogManager::DEBUG);
+            logManager.log(LogManager::DEBUG, "Deleted \\t\\n\\r\\f\\v from uri and now uri is clean");
+        }
+
         logManager.setLogLevel(LogManager::DEBUG);
         logManager.log(LogManager::DEBUG, "Setting up secure WebSocket connection");
         // * Set logging settings for WebSocket client
@@ -508,13 +530,14 @@ void handle_secure(const std::string &uri, tls_client *tc)
         tc->set_access_channels(websocketpp::log::alevel::none);
         // * Initialize ASIO for WebSocket client
         tc->init_asio();
+        // * Set the TLS context initialization handler
+        tc->set_tls_init_handler(websocketpp::lib::bind(&on_tls_init, websocketpp::lib::placeholders::_1));
         // * Set the open handler for the WebSocket connection
         tc->set_open_handler(websocketpp::lib::bind(&on_open_secure, tc, websocketpp::lib::placeholders::_1));
-        // * Set the TLS initialization handler for the WebSocket connection
-        tc->set_tls_init_handler(websocketpp::lib::bind(&on_tls_init, websocketpp::lib::placeholders::_1));
         // * Create connection to WebSocket server
         websocketpp::lib::error_code ec;
-        tls_client::connection_ptr con = tc->get_connection(uri, ec);
+        std::cout << "Connecting to secure WebSocket server at " << uri_clean << std::endl;
+        tls_client::connection_ptr con = tc->get_connection(uri_clean, ec);
         if (ec)
         {
             std::cerr << "Error: " << ec.message() << std::endl;
@@ -524,15 +547,15 @@ void handle_secure(const std::string &uri, tls_client *tc)
         }
         // * Connect to the server
         tc->connect(con);
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Connected to WebSocket server");
-        // Start a separate thread for WebSocket client to handle the connection
-        logManager.setLogLevel(LogManager::DEBUG);
-        logManager.log(LogManager::DEBUG, "Starting WebSocket client thread");
         std::thread websocket_thread([tc]()
                                      {
-                                         tc->run(); // Run the WebSocket client
+                                         tc->run(); // * Run the WebSocket client
                                      });
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Connected to secure WebSocket server");
+        // * Start a separate thread for WebSocket client to handle the connection
+        logManager.setLogLevel(LogManager::DEBUG);
+        logManager.log(LogManager::DEBUG, "Starting WebSocket client thread");
         // * Start threads for updating and printing the sensor data
         logManager.setLogLevel(LogManager::DEBUG);
         logManager.log(LogManager::DEBUG, "Starting data is_run with threads");
@@ -544,7 +567,7 @@ void handle_secure(const std::string &uri, tls_client *tc)
         std::cout << "update_thread joined" << std::endl;
         logManager.setLogLevel(LogManager::INFO);
         logManager.log(LogManager::INFO, "Updating sensor data thread joined");
-
+        
         print_thread.join();
         std::cout << "print_thread joined" << std::endl;
         logManager.setLogLevel(LogManager::INFO);
@@ -558,21 +581,20 @@ void handle_secure(const std::string &uri, tls_client *tc)
         if (!is_run) {
             tc->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
             logManager.setLogLevel(LogManager::INFO);
-            logManager.log(LogManager::INFO, "Disconnected from WebSocket server");
+            logManager.log(LogManager::INFO, "Disconnected from secure WebSocket server");
         }
+
         websocket_thread.join();
+
         std::cout << "websocket_thread joined" << std::endl;
         logManager.setLogLevel(LogManager::INFO);
         logManager.log(LogManager::INFO, "WebSocket client thread joined");
-    }
-    catch (const websocketpp::exception &e)
-    {
+
+    } catch (const websocketpp::exception &e) {
         std::cerr << "WebSocket error: " << e.what() << std::endl;
         logManager.setLogLevel(LogManager::ERR);
         logManager.log(LogManager::ERR, "WebSocket error: " + std::string(e.what()));
-    }
-    catch (const std::exception &e)
-    {
+    } catch (const std::exception &e) {
         std::cerr << "Error: " << e.what() << std::endl;
         logManager.setLogLevel(LogManager::ERR);
         logManager.log(LogManager::ERR, "Error: " + std::string(e.what()));
@@ -668,46 +690,50 @@ bool is_secure(const std::string &uri)
 
 int main(int argc, char *argv[]){
     std::cout << "EdgeFrontier - Sensor Data Simulator" << std::endl;
-    std::cout << "Press 'q' to quit the program." << std::endl;
+    std::cout << "Press 't' or 'T' to quit the program." << std::endl;
 
     for (int i = 0; i < argc; i++) {
         std::cout << "Argument " << i << ": " << argv[i] << std::endl;
     }
     // * Set the log file for the log manager
     logManager.setLogFile("EdgeFrontier/log/activity.log");
-    // * Load environment variables from .env file
+    // * Load environment variables from a .env file
     std::string envFilePath = "EdgeFrontier/env/dev.env";
+
     auto envMap = loadEnvFile(envFilePath);
 
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Environment variables loaded from .env file.");
 
     // * Check if the WS_URI environment variable is set
-    const char* uri_cstr = getenv("WS_URI");
-    if (uri_cstr == nullptr) {
+    std::string ws_uri_cstr = envMap["WS_URI"];
+    if (ws_uri_cstr.empty()) {
         std::cerr << "Error: WS_URI environment variable is not set." << std::endl;
         logManager.setLogLevel(LogManager::ERR);
         logManager.log(LogManager::ERR, "WS_URI environment variable is not set.");
         return 1;
     }
+    // TODO I recommend to remove this "\t\n\r\f\v" at the end of the string
+    ws_uri_cstr.erase(ws_uri_cstr.find_last_not_of("\t\n\r\f\v") + 1);
 
-    std::cout << "WS_URI: " << uri_cstr << std::endl;
+    std::string uri(ws_uri_cstr);
+    std::cout << "WS_URI: " << uri << std::endl;
 
     // * Check if the REST_MAIN_SERVER environment variable is set
-    const char* rest_main_server_cstr = getenv("REST_MAIN_SERVER");
-    if (rest_main_server_cstr == nullptr) {
+    std::string rest_main_server_cstr = getenv("REST_MAIN_SERVER");
+    if (rest_main_server_cstr.empty()) {
         std::cerr << "Error: REST_MAIN_SERVER environment variable is not set." << std::endl;
         logManager.setLogLevel(LogManager::ERR);
         logManager.log(LogManager::ERR, "REST_MAIN_SERVER environment variable is not set.");
         return 1;
     }
+    // TODO I recommend to remove this "\t\n\r\f\v" at the end of the string
+    rest_main_server_cstr.erase(rest_main_server_cstr.find_last_not_of("\t\n\r\f\v") + 1);
 
     std::cout << "REST_MAIN_SERVER: " << rest_main_server_cstr << std::endl;
 
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Connecting to WebSocket server");
-
-    std::string uri(uri_cstr);
 
     std::cout << "Connecting to WebSocket server at: " << uri << std::endl;
     client c;
@@ -722,7 +748,8 @@ int main(int argc, char *argv[]){
     std::thread input_thread(checkInput_main);
 
     // * Check if the WebSocket connection is secure
-    is_secure(uri) ? handle_secure(uri, &tc) : handle_no_secure(uri, &c);
+    cout << uri << endl;
+    is_secure(uri) ? handle_secure(ws_uri_cstr, &tc) : handle_no_secure(ws_uri_cstr, &c);
 
     std::cout << "Exiting main thread" << std::endl;
     logManager.setLogLevel(LogManager::INFO);
@@ -730,45 +757,6 @@ int main(int argc, char *argv[]){
 
     // * Wait for the input thread to finish
     input_thread.join();
-
-    // * Database initialization
-
-    // Create a database connection
-    // DBHelper db("sensor_data.db");
-
-    // // Create a table
-    // db.create_table("sensor_data", {
-    //     "TimeStamp TEXT",
-    //     "ID INTEGER PRIMARY KEY AUTOINCREMENT",
-    //     "HardwareID TEXT PRIMARY KEY NOT NULL",
-    //     "Event TEXT",
-    //     "CO2 REAL",
-    //     "VOC REAL",
-    //     "RA REAL",
-    //     "TEMP REAL",
-    //     "HUMID REAL",
-    //     "PRESSURE REAL"
-    // });
-
-    // nlohmann::json sensor_data = {
-    //     {"TimeStamp", "18/11/24 08:06:59"},
-    //     {"HardwareID", "EF-001"},
-    //     {"Event", "Cold"},
-    //     {"Data", {
-    //         {"CO2", dis(gen)},
-    //         {"VOC", dis(gen)},
-    //         {"RA", dis(gen)},
-    //         {"TEMP", dis(gen)},
-    //         {"HUMID", dis(gen)},
-    //         {"PRESSURE", dis(gen)}
-    //     }}
-    // };
-
-    // // Insert the data
-    // db.insert_data("sensor_data", sensor_data);
-
-    // // Retrieve and display the data
-    // db.select_data("sensor_data");
     
     return 0;
 }
