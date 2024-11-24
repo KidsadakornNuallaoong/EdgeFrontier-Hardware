@@ -1,3 +1,6 @@
 [submodule "Libs/MLP"]
 	path = Libs/MLP
 	url = https://github.com/KidsadakornNuallaoong/Neural-Network-MLP.git
+[submodule "Neural-Network-MLP"]
+	path = Neural-Network-MLP
+	url = https://github.com/KidsadakornNuallaoong/Neural-Network-MLP.git
