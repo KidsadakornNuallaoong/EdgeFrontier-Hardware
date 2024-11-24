@@ -97,8 +97,9 @@ app:
 install:
 	sudo apt-get install libboost-all-dev libjsoncpp-dev libsqlite3-dev libcurl4-openssl-dev nlohmann-json3-dev libssl-dev curl libcurl4-openssl-dev libssl-dev
 set-folder:
-	mkdir -p $(outdir)/app $(outdir)/env $(outdir)/log
+	mkdir -p $(outdir)/app $(outdir)/env $(outdir)/log $(outdir)/model
 	cp -r dev.env $(outdir)/env
+	cp -r model.json $(outdir)/model
 clean:
 	rm -f $(outfile) *.exe ./$(Library_Path)/$(Perceptron_Path)/*.o ./$(Library_Path)/$(MLP_Path)/*.o
 	rm -rf $(outdir)

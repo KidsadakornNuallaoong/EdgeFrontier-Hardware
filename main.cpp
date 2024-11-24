@@ -142,7 +142,7 @@ std::string HardwareID = "EF-001";
 
 // * JSON structure holding initial sensor data
 nlohmann::json sensor_data = {
-    {"TimeStamp", "18/11/24 08:06:59"},
+    {"TimeStamp", std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())},
     {"HardwareID", HardwareID},
     {"Event", "Cold"},
     {"Mode", (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode"},
@@ -165,16 +165,31 @@ nlohmann::json sensor_data = {
     }}
 };
 
+enum speed {SLOW, MEDIUM, FAST};
+speed current_speed = SLOW;
+
+nlohmann::json info = {
+    {"HardwareID", HardwareID},
+    {"Mode", (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode"},
+    {"SPEED", (current_speed == SLOW) ? "SLOW" : (current_speed == MEDIUM) ? "MEDIUM" : "FAST"}
+};
+
 void Delay(){ std::this_thread::sleep_for(std::chrono::microseconds(100000)); }
+
+void change_mode( mode m) {
+    current_mode = m;
+    info["Mode"] = (current_mode == PREDICTION_MODE) ? "Prediction mode" : "Safe mode";
+}
+
+void change_speed(speed s) {
+    current_speed = s;
+    info["SPEED"] = (current_speed == SLOW) ? "SLOW" : (current_speed == MEDIUM) ? "MEDIUM" : "FAST";
+}
 
 // * Function to update sensor data with new Arandom values
 void update_sensor_data(nlohmann::json& j) {
     std::lock_guard<std::mutex> lock(mtx);
-    auto now = std::chrono::system_clock::now();
-    std::time_t now_c = std::chrono::system_clock::to_time_t(now);
-    std::stringstream ss;
-    ss << std::put_time(std::localtime(&now_c), "%d/%m/%y %H:%M:%S");
-    j["TimeStamp"] = ss.str();
+    j["TimeStamp"] = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
     std::uniform_int_distribution<> hardware_dist(0, sizeof(HardwareID)/sizeof(HardwareID[0]) - 1);
     std::uniform_int_distribution<> event_dist(0, sizeof(Event)/sizeof(Event[0]) - 1);
     j["HardwareID"] = HardwareID;
@@ -316,7 +331,7 @@ void Ai_handle() {
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Setting up AI model");
 
-    mlp2.import_from_json("mlp_export.json");
+    mlp2.import_from_json("EdgeFrontier/model/model.json");
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Starting Ai_handle thread");
 
@@ -535,67 +550,62 @@ void handle_secure(const std::string &uri, tls_client *tc)
         // * Set the open handler for the WebSocket connection
         tc->set_open_handler(websocketpp::lib::bind(&on_open_secure, tc, websocketpp::lib::placeholders::_1));
         
-        while (is_run)
+        // * Create connection to WebSocket server
+        websocketpp::lib::error_code ec;
+        std::cout << "Connecting to secure WebSocket server at " << uri_clean << std::endl;
+        change_mode(PREDICTION_MODE);
+        tls_client::connection_ptr con = tc->get_connection(uri_clean, ec);
+        if (ec)
         {
-            // * Create connection to WebSocket server
-            websocketpp::lib::error_code ec;
-            std::cout << "Connecting to secure WebSocket server at " << uri_clean << std::endl;
-            tls_client::connection_ptr con = tc->get_connection(uri_clean, ec);
-            if (ec)
-            {
-                std::cerr << "Error: " << ec.message() << std::endl;
-                logManager.setLogLevel(LogManager::ERR);
-                logManager.log(LogManager::ERR, "Error: " + ec.message());
-                std::this_thread::sleep_for(std::chrono::seconds(5)); // Wait before retrying
-                continue;
-            }
-            // * Connect to the server
-            tc->connect(con);
-            std::thread websocket_thread([tc]()
-                                         {
-                                             tc->run(); // * Run the WebSocket client
-                                         });
-            logManager.setLogLevel(LogManager::INFO);
-            logManager.log(LogManager::INFO, "Connected to secure WebSocket server");
-            // * Start a separate thread for WebSocket client to handle the connection
-            logManager.setLogLevel(LogManager::DEBUG);
-            logManager.log(LogManager::DEBUG, "Starting WebSocket client thread");
-            // * Start threads for updating and printing the sensor data
-            logManager.setLogLevel(LogManager::DEBUG);
-            logManager.log(LogManager::DEBUG, "Starting data is_run with threads");
-            std::thread update_thread(update_json_loop);
-            std::thread print_thread(print_json);
-            std::thread Ai_thread(Ai_handle);
-            // * Wait for threads to finish
-            update_thread.join();
-            std::cout << "update_thread joined" << std::endl;
-            logManager.setLogLevel(LogManager::INFO);
-            logManager.log(LogManager::INFO, "Updating sensor data thread joined");
-            
-            print_thread.join();
-            std::cout << "print_thread joined" << std::endl;
-            logManager.setLogLevel(LogManager::INFO);
-            logManager.log(LogManager::INFO, "Printing sensor data thread joined");
-
-            Ai_thread.join();
-            std::cout << "Ai_thread joined" << std::endl;
-            logManager.setLogLevel(LogManager::INFO);
-            logManager.log(LogManager::INFO, "AI thread joined");
-
-            if (!is_run) {
-                tc->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
-                logManager.setLogLevel(LogManager::INFO);
-                logManager.log(LogManager::INFO, "Disconnected from secure WebSocket server");
-
-                break;
-            }
-
-            websocket_thread.join();
-
-            std::cout << "websocket_thread joined" << std::endl;
-            logManager.setLogLevel(LogManager::INFO);
-            logManager.log(LogManager::INFO, "WebSocket client thread joined");
+            std::cerr << "Error: " << ec.message() << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "Error: " + ec.message());
+            return;
         }
+        // * Connect to the server
+        tc->connect(con);
+        std::thread websocket_thread([tc]()
+                                        {
+                                            tc->run(); // * Run the WebSocket client
+                                        });
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Connected to secure WebSocket server");
+        // * Start a separate thread for WebSocket client to handle the connection
+        logManager.setLogLevel(LogManager::DEBUG);
+        logManager.log(LogManager::DEBUG, "Starting WebSocket client thread");
+        // * Start threads for updating and printing the sensor data
+        logManager.setLogLevel(LogManager::DEBUG);
+        logManager.log(LogManager::DEBUG, "Starting data is_run with threads");
+        std::thread update_thread(update_json_loop);
+        std::thread print_thread(print_json);
+        std::thread Ai_thread(Ai_handle);
+        // * Wait for threads to finish
+        update_thread.join();
+        std::cout << "update_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Updating sensor data thread joined");
+        
+        print_thread.join();
+        std::cout << "print_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+
+        Ai_thread.join();
+        std::cout << "Ai_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "AI thread joined");
+
+        if (!is_run) {
+            tc->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Disconnected from secure WebSocket server");
+        }
+
+        websocket_thread.join();
+
+        std::cout << "websocket_thread joined" << std::endl;
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "WebSocket client thread joined");
 
     } catch (const websocketpp::exception &e) {
         std::cerr << "WebSocket error: " << e.what() << std::endl;
