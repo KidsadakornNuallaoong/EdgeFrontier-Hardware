@@ -4,5 +4,3 @@ dist
 *.db
 *.env
 EdgeFrontier
-# Libs/MLP
-# Libs/Perceptron
