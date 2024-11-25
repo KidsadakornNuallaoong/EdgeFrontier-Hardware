@@ -58,8 +58,15 @@ public:
             logFile_ << logMessage << std::endl;
         }
 
-        // Always log to console
-        std::cout << logMessage << std::endl;
+        // Always log with color level to console
+        switch (level) {
+            // * timestamp one color , color by log level, message is white
+            case INFO:    std::cout << "\033[0m[\033[90m" << timestamp << "\033[0m] \033[1;32m[INFO] \033[0m" << message << std::endl; break;
+            case WARNING: std::cout << "\033[0m[\033[90m" << timestamp << "\033[0m] \033[1;33m[WARNING] \033[0m" << message << std::endl; break;
+            case ERR:     std::cerr << "\033[0m[\033[90m" << timestamp << "\033[0m] \033[1;31m[ERROR] \033[0m" << message << std::endl; break;
+            case DEBUG:   std::cout << "\033[0m[\033[90m" << timestamp << "\033[0m] \033[1;34m[DEBUG] \033[0m" << message << std::endl; break;
+            default:      std::cerr << "Unknown log level: " << level << std::endl; break;
+        }
     }
 
 private:

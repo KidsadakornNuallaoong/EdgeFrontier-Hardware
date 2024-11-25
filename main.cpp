@@ -21,7 +21,7 @@
  * 
  * @section author Author
  * Kidsadakorn Nuallaoong
- * @date 2023-10-05
+ * @date 2024-11-05
  **/
 #include <iostream>
 #include <thread>
@@ -142,7 +142,7 @@ std::uniform_real_distribution<> dis(0.0, 100.0);
 
 // * Event types for sensor data
 const char* Event[] = {"Cold", "Warm", "Hot", "Dry", "Wet", "Normal", "Unknown"};
-std::string HardwareID = "UNKNOWN";
+std::string HardwareID = "UNKNOWn";
 
 // * JSON structure holding initial sensor data
 nlohmann::json sensor_data = {
@@ -380,35 +380,50 @@ void handle_machine(){
         std::cout << "Response: " << res << std::endl;
         if (res != "") {
             pre_info = nlohmann::json::parse(res);
-            if (pre_info["HardwareID"] != "UNKNOWN") {
-                HardwareID = pre_info["HardwareID"].get<std::string>();
+            if (pre_info["HardwareID"] == HardwareID) {
                 MODE = pre_info["Mode"].get<std::string>();
                 SPEED = pre_info["Speed"].get<std::string>();
                 std::transform(HardwareID.begin(), HardwareID.end(), HardwareID.begin(), ::toupper);
                 std::transform(MODE.begin(), MODE.end(), MODE.begin(), ::toupper);
                 std::transform(SPEED.begin(), SPEED.end(), SPEED.begin(), ::toupper);
                 if (MODE == "PREDICTION") {
-                    current_mode = PREDICTION_MODE;
-                    logManager.setLogLevel(LogManager::INFO);
-                    logManager.log(LogManager::INFO, "Switching to PREDICTION mode");
+                    // * check if current mode is not prediction mode then switch to prediction mode
+                    if (current_mode != PREDICTION_MODE) {
+                        current_mode = PREDICTION_MODE;
+                        logManager.setLogLevel(LogManager::INFO);
+                        logManager.log(LogManager::INFO, "Switching to PREDICTION mode");
+                    }
                 } else {
-                    current_mode = SAFE_MODE;
-                    logManager.setLogLevel(LogManager::INFO);
-                    logManager.log(LogManager::INFO, "Switching to SAFE mode");
+                    // * check if current mode is not safe mode then switch to safe mode
+                    if (current_mode != SAFE_MODE) {
+                        current_mode = SAFE_MODE;
+                        logManager.setLogLevel(LogManager::INFO);
+                        logManager.log(LogManager::INFO, "Switching to SAFE mode");
+                    }
                 }
                 if (SPEED == "SLOW") {
-                    current_speed = SLOW;
-                    logManager.setLogLevel(LogManager::INFO);
-                    logManager.log(LogManager::INFO, "Setting speed to SLOW");
+                    if (current_speed != SLOW) {
+                        current_speed = SLOW;
+                        logManager.setLogLevel(LogManager::INFO);
+                        logManager.log(LogManager::INFO, "Setting speed to SLOW");
+                    }
                 } else if (SPEED == "MEDIUM") {
-                    current_speed = MEDIUM;
-                    logManager.setLogLevel(LogManager::INFO);
-                    logManager.log(LogManager::INFO, "Setting speed to MEDIUM");
+                    if (current_speed != MEDIUM) {
+                        current_speed = MEDIUM;
+                        logManager.setLogLevel(LogManager::INFO);
+                        logManager.log(LogManager::INFO, "Setting speed to MEDIUM");
+                    }
                 } else {
-                    current_speed = FAST;
-                    logManager.setLogLevel(LogManager::INFO);
-                    logManager.log(LogManager::INFO, "Setting speed to FAST");
+                    if (current_speed != FAST) {
+                        current_speed = FAST;
+                        logManager.setLogLevel(LogManager::INFO);
+                        logManager.log(LogManager::INFO, "Setting speed to FAST");
+                    }
                 }
+            } else {
+                std::cerr << "HardwareID not match" << std::endl;
+                logManager.setLogLevel(LogManager::ERR);
+                logManager.log(LogManager::ERR, "HardwareID not match");
             }
         }
         delay_server();
@@ -532,20 +547,38 @@ void handle_no_secure(const std::string &uri, client *c)
         std::thread print_thread(print_json);
         std::thread Ai_thread(Ai_handle);
         // * Wait for threads to finish
-        update_thread.join();
-        std::cout << "update_thread joined" << std::endl;
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Updating sensor data thread joined");
-        
-        print_thread.join();
-        std::cout << "print_thread joined" << std::endl;
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+        if (update_thread.joinable()) {
+            update_thread.join();
+            std::cout << "update_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Updating sensor data thread joined");
+        } else {
+            std::cerr << "update_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "Updating sensor data thread is not joinable");
+        }
 
-        Ai_thread.join();
-        std::cout << "Ai_thread joined" << std::endl;
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "AI thread joined");
+        if (print_thread.joinable()) {
+            print_thread.join();
+            std::cout << "print_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+        } else {
+            std::cerr << "print_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "Printing sensor data thread is not joinable");
+        }
+
+        if (Ai_thread.joinable()) {
+            Ai_thread.join();
+            std::cout << "Ai_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "AI thread joined");
+        } else {
+            std::cerr << "Ai_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "AI thread is not joinable");
+        }
 
         if (!is_run) {
             c->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
@@ -646,20 +679,38 @@ void handle_secure(const std::string &uri, tls_client *tc)
         std::thread print_thread(print_json);
         std::thread Ai_thread(Ai_handle);
         // * Wait for threads to finish
-        update_thread.join();
-        std::cout << "update_thread joined" << std::endl;
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Updating sensor data thread joined");
-        
-        print_thread.join();
-        std::cout << "print_thread joined" << std::endl;
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+        if (update_thread.joinable()) {
+            update_thread.join();
+            std::cout << "update_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Updating sensor data thread joined");
+        } else {
+            std::cerr << "update_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "Updating sensor data thread is not joinable");
+        } 
 
-        Ai_thread.join();
-        std::cout << "Ai_thread joined" << std::endl;
-        logManager.setLogLevel(LogManager::INFO);
-        logManager.log(LogManager::INFO, "AI thread joined");
+        if (print_thread.joinable()) {
+            print_thread.join();
+            std::cout << "print_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "Printing sensor data thread joined");
+        } else {
+            std::cerr << "print_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "Printing sensor data thread is not joinable");
+        }
+
+        if (Ai_thread.joinable()) {
+            Ai_thread.join();
+            std::cout << "Ai_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "AI thread joined");
+        } else {
+            std::cerr << "Ai_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "AI thread is not joinable");
+        }
 
         if (!is_run) {
             tc->close(con->get_handle(), websocketpp::close::status::normal, "User requested disconnect");
@@ -667,7 +718,16 @@ void handle_secure(const std::string &uri, tls_client *tc)
             logManager.log(LogManager::INFO, "Disconnected from secure WebSocket server");
         }
 
-        websocket_thread.join();
+        if (websocket_thread.joinable()) {
+            websocket_thread.join();
+            std::cout << "websocket_thread joined" << std::endl;
+            logManager.setLogLevel(LogManager::INFO);
+            logManager.log(LogManager::INFO, "WebSocket client thread joined");
+        } else {
+            std::cerr << "websocket_thread is not joinable" << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "WebSocket client thread is not joinable");
+        }
 
         std::cout << "websocket_thread joined" << std::endl;
         logManager.setLogLevel(LogManager::INFO);
@@ -729,7 +789,7 @@ std::unordered_map<std::string, std::string> loadEnvFile(const std::string& file
         std::string value = line.substr(delimiterPos + 1);
 
         logManager.setLogLevel(LogManager::DEBUG);
-        logManager.log(LogManager::DEBUG, "Loaded environment variable from .env file");
+        logManager.log(LogManager::DEBUG, "Loaded .env KEY : " + key);
 
         // Trim whitespace (optional, implement trim logic if needed)
         envMap[key] = value;
@@ -783,8 +843,60 @@ int main(int argc, char *argv[]){
     logManager.setLogFile("EdgeFrontier/log/activity.log");
     // * Load environment variables from a .env file
     std::string envFilePath = "EdgeFrontier/env/dev.env";
+    std::unordered_map<std::string, std::string> envMap;
 
-    auto envMap = loadEnvFile(envFilePath);
+    std::string response = "";
+    std::transform(HardwareID.begin(), HardwareID.end(), HardwareID.begin(), ::toupper);
+    // TODO Check if the response is empty or not
+    while (HardwareID == "UNKNOWN") {
+        envMap = loadEnvFile(envFilePath);
+        // * Check if the REST_MAIN_SERVER environment variable is set
+        rest_main_server_cstr = getenv("REST_MAIN_SERVER");
+        if (rest_main_server_cstr.empty()) {
+            std::cerr << "Error: REST_MAIN_SERVER environment variable is not set." << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "REST_MAIN_SERVER environment variable is not set.");
+            return 1;
+        }
+        // TODO I recommend to remove this "\t\n\r\f\v" at the end of the string
+        rest_main_server_cstr.erase(rest_main_server_cstr.find_last_not_of("\t\n\r\f\v") + 1);
+
+        logManager.setLogLevel(LogManager::DEBUG);
+        logManager.log(LogManager::DEBUG, "REST_MAIN_SERVER environment variable is set.");
+
+        std::cout << "REST_MAIN_SERVER: " << rest_main_server_cstr << std::endl;
+        response = http.get(rest_main_server_cstr + "/register");
+        if (response == "") {
+            std::cerr << "Error: Unable to connect to the main server." << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "Unable to connect to the main server.");
+            std::this_thread::sleep_for(std::chrono::microseconds(200000));
+        }
+
+        if (response != "") {
+            nlohmann::json pre_info = nlohmann::json::parse(response);
+            if (pre_info["HardwareID"] != "UNKNOWN") {
+                HardwareID = pre_info["HardwareID"].get<std::string>();
+                std::transform(HardwareID.begin(), HardwareID.end(), HardwareID.begin(), ::toupper);
+                std::cout << "HardwareID: " << HardwareID << std::endl;
+                logManager.setLogLevel(LogManager::INFO);
+                logManager.log(LogManager::INFO, "HardwareID is set.");
+            }
+        } else {
+            std::cerr << "Error: HardwareID is not set." << std::endl;
+            logManager.setLogLevel(LogManager::ERR);
+            logManager.log(LogManager::ERR, "HardwareID is not set.");
+        }
+    }
+
+    // ! if rest api is http log warning
+    if (rest_main_server_cstr.find("https") == std::string::npos) {
+        logManager.setLogLevel(LogManager::WARNING);
+        logManager.log(LogManager::WARNING, "REST API is not secure");
+    } else {
+        logManager.setLogLevel(LogManager::DEBUG);
+        logManager.log(LogManager::DEBUG, "REST API is secure");
+    }
 
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Environment variables loaded from .env file.");
@@ -806,38 +918,6 @@ int main(int argc, char *argv[]){
 
     std::cout << "WS_URI: " << uri << std::endl;
 
-    // * Check if the REST_MAIN_SERVER environment variable is set
-    rest_main_server_cstr = getenv("REST_MAIN_SERVER");
-    if (rest_main_server_cstr.empty()) {
-        std::cerr << "Error: REST_MAIN_SERVER environment variable is not set." << std::endl;
-        logManager.setLogLevel(LogManager::ERR);
-        logManager.log(LogManager::ERR, "REST_MAIN_SERVER environment variable is not set.");
-        return 1;
-    }
-    // TODO I recommend to remove this "\t\n\r\f\v" at the end of the string
-    rest_main_server_cstr.erase(rest_main_server_cstr.find_last_not_of("\t\n\r\f\v") + 1);
-
-    logManager.setLogLevel(LogManager::DEBUG);
-    logManager.log(LogManager::DEBUG, "REST_MAIN_SERVER environment variable is set.");
-
-    std::cout << "REST_MAIN_SERVER: " << rest_main_server_cstr << std::endl;
-
-    std::string response = http.get(rest_main_server_cstr + "/register");
-    std::cout << "Response: " << response << std::endl;
-
-    if (response == "") {
-        std::cerr << "Error: Unable to connect to the main server." << std::endl;
-        logManager.setLogLevel(LogManager::ERR);
-        logManager.log(LogManager::ERR, "Unable to connect to the main server.");
-        return 1;
-    }
-
-    // * parse response to json
-    nlohmann::json j = nlohmann::json::parse(response);
-    HardwareID = j["HardwareID"];
-
-    std::cout << "HardwareID: " << HardwareID << std::endl;
-
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Connecting to WebSocket server");
 
@@ -849,15 +929,15 @@ int main(int argc, char *argv[]){
     
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Checking if WebSocket connection is secure.");
-    
-    // * is_run thread for checking input
-    std::thread input_thread(checkInput_main);
-    logManager.setLogLevel(LogManager::DEBUG);
-    logManager.log(LogManager::DEBUG, "Starting input checking thread");
 
     std::thread machine_thread(handle_machine);
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Starting machine handle thread");
+
+    // * is_run thread for checking input
+    std::thread input_thread(checkInput_main);
+    logManager.setLogLevel(LogManager::DEBUG);
+    logManager.log(LogManager::DEBUG, "Starting input checking thread");
 
     // * Check if the WebSocket connection is secure
     is_secure(uri) ? handle_secure(ws_uri_cstr, &tc) : handle_no_secure(ws_uri_cstr, &c);
@@ -867,12 +947,24 @@ int main(int argc, char *argv[]){
     logManager.log(LogManager::INFO, "Exiting main thread");
 
     // * Wait for the input thread to finish
-    input_thread.join();
-    logManager.setLogLevel(LogManager::INFO);
-    logManager.log(LogManager::INFO, "Input checking thread joined");
-    machine_thread.join();
-    logManager.setLogLevel(LogManager::INFO);
-    logManager.log(LogManager::INFO, "Machine handle thread joined");
+    if (input_thread.joinable()) {
+        input_thread.join();
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Input checking thread joined");
+    } else {
+        logManager.setLogLevel(LogManager::ERR);
+        logManager.log(LogManager::ERR, "Input checking thread is not joinable");
+    }
+    
+    // * Wait for the machine handle thread to finish
+    if (machine_thread.joinable()) {
+        machine_thread.join();
+        logManager.setLogLevel(LogManager::INFO);
+        logManager.log(LogManager::INFO, "Machine handle thread joined");
+    } else {
+        logManager.setLogLevel(LogManager::ERR);
+        logManager.log(LogManager::ERR, "Machine handle thread is not joinable");
+    }
     
     return 0;
 }

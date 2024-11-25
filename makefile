@@ -82,14 +82,15 @@ else
 LDFLAGS=-lssl -lcrypto -lcurl -lpthread -lboost_system -lboost_thread -ljsoncpp -lsqlite3
 PREFILE:
 	$(GXX) ./$(Library_Path)/$(Perceptron_Path)/Perceptron.cpp -o ./$(Library_Path)/$(Perceptron_Path)/$(PerceptronName).o -c || $(MAKE) --no-print-directory clean
-	echo "\033[1;32mPREFILE Perceptron compiled successfully!\033[0m"
+	echo "Build Perceptron : \033[1;32mSUCCESS\033[0m"
 
 	$(GXX) ./$(Library_Path)/$(MLP_Path)/MLP.cpp -o ./$(Library_Path)/$(MLP_Path)/$(MLPName).o -c || $(MAKE) --no-print-directory clean
-	echo "\033[1;32mPREFILE MultiLayerPerceptron compiled successfully!\033[0m"
+	echo "Build MultiLayerPerceptron : \033[1;32mSUCCESS\033[0m"
 
 build: PREFILE
 	$(MAKE) --no-print-directory set-folder
 	$(GXX) $(CXXFLAGS) $(inputfile) ./$(Library_Path)/$(Perceptron_Path)/$(PerceptronName).o ./$(Library_Path)/$(MLP_Path)/$(MLPName).o -o $(outdir)/app/$(outfile) $(LDFLAGS)
+	echo "Build $(outfile) : \033[1;32mSUCCESS\033[0m"
 run: build
 	./$(outdir)/app/$(outfile)
 	$(MAKE) --no-print-directory clean
@@ -100,8 +101,9 @@ install:
 set-folder:
 	mkdir -p $(outdir)/app $(outdir)/env $(outdir)/log $(outdir)/model
 	cp -r dev.env $(outdir)/env
-	cp -r model.json $(outdir)/model
+	cp -r model.json $(outdir)/model	
+	echo "Set folder : \033[1;32mSUCCESS\033[0m"
 clean:
-	rm -f $(outfile) *.exe ./$(Library_Path)/$(Perceptron_Path)/*.o ./$(Library_Path)/$(MLP_Path)/*.o
+	rm -f $(outfile) *.exe ./$(Library_Path)/$(Perceptron_Path)/*.o ./$(Library_Path)/$(MLP_Path)/*.o *.o
 	rm -rf $(outdir)
 endif
