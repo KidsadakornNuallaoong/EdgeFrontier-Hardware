@@ -97,7 +97,7 @@ run: build
 app:
 	$(MAKE) --no-print-directory build
 install:
-	sudo apt-get install libboost-all-dev libjsoncpp-dev libsqlite3-dev libcurl4-openssl-dev nlohmann-json3-dev libssl-dev curl libcurl4-openssl-dev libssl-dev
+	apt install libboost-all-dev libjsoncpp-dev libsqlite3-dev libcurl4-openssl-dev nlohmann-json3-dev libssl-dev curl libcurl4-openssl-dev libssl-dev
 set-folder:
 	mkdir -p $(outdir)/app $(outdir)/env $(outdir)/log $(outdir)/model
 	cp -r dev.env $(outdir)/env

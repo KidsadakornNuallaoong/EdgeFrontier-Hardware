@@ -295,8 +295,15 @@ void send_json_loop(client* c, websocketpp::connection_hdl hdl) {
     while (is_run) {
         {
             std::lock_guard<std::mutex> lock(mtx); // Ensuring thread safety
-            std::string message = sensor_data.dump(); // Serialize the JSON message
-            c->send(hdl, message, websocketpp::frame::opcode::text); // Send the JSON message to the server
+            std::string message = sensor_data.dump(); // Serialize the JSON messages
+            // TODO if current mode is prediction mode then send data and prediction but if safe mode send only data not prediction
+            if (current_mode == SAFE_MODE) {
+                nlohmann::json safe_mode_data = sensor_data;
+                safe_mode_data.erase("Prediction");
+                c->send(hdl, safe_mode_data.dump(), websocketpp::frame::opcode::text);
+            } else {
+                c->send(hdl, message, websocketpp::frame::opcode::text);
+            }
         }
         delay();
     }
@@ -327,7 +334,15 @@ void send_json_loop_secure(tls_client* tc, websocketpp::connection_hdl hdl) {
             std::lock_guard<std::mutex> lock(mtx);
             std::string message = sensor_data.dump();
             websocketpp::lib::error_code ec;
-            tc->send(hdl, message, websocketpp::frame::opcode::text, ec);
+            // tc->send(hdl, message, websocketpp::frame::opcode::text, ec);
+            // TODO if current mode is prediction mode then send data and prediction but if safe mode send only data not prediction
+            if (current_mode == SAFE_MODE) {
+                nlohmann::json safe_mode_data = sensor_data;
+                safe_mode_data.erase("Prediction");
+                tc->send(hdl, safe_mode_data.dump(), websocketpp::frame::opcode::text, ec);
+            } else {
+                tc->send(hdl, message, websocketpp::frame::opcode::text, ec);
+            }
             if (ec) {
                 std::cerr << "Send error: " << ec.message() << std::endl;
             }
@@ -341,23 +356,36 @@ void send_json_loop_secure(tls_client* tc, websocketpp::connection_hdl hdl) {
 }
 
 void Ai_handle() {
-    MultiLayerPerceptron<double> mlp2;
+    MultiLayerPerceptron<double> mlp;
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Setting up AI model");
 
-    mlp2.import_from_json("EdgeFrontier/model/model.json");
+    mlp.import_from_json("EdgeFrontier/model/model.json");
     logManager.setLogLevel(LogManager::DEBUG);
     logManager.log(LogManager::DEBUG, "Starting Ai_handle thread");
 
     while (is_run){
         {
-            vector<vector<double>> inputs = {{static_cast<double>(rand()%2), static_cast<double>(rand()%2)}};
-            mlp2.predict(inputs, R_D);
+            if (current_mode == PREDICTION_MODE) {
+                vector<vector<double>> inputs = {{
+                        sensor_data["Data"]["CO2"].get<double>(),
+                        sensor_data["Data"]["VOC"].get<double>(),
+                        sensor_data["Data"]["RA"].get<double>(),
+                        sensor_data["Data"]["TEMP"].get<double>(),
+                        sensor_data["Data"]["HUMID"].get<double>(),
+                        sensor_data["Data"]["PRESSURE"].get<double>()
+                    }};
+                vector<vector<double>> prediction = mlp.predict(inputs, NONE);
+                std::lock_guard<std::mutex> lock(mtx);
+                for (int i = 0; i < prediction[0].size(); ++i) {
+                    sensor_data["Prediction"][Event[i]] = prediction[0][i] * 100;
+                }
+            }
         }
         delay();
     }
 
-    mlp2.clearModel();
+    mlp.clearModel();
 
     std::cout << "Exiting Ai_handle thread" << std::endl;
     logManager.setLogLevel(LogManager::INFO);
